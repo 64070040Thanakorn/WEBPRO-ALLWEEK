@@ -65,6 +65,72 @@ app.get("/todo/", async (req, res) => {
     res.status(200);
   }
 });
+
+// joiiiii
+const postSchema = Joi.object({
+  title: Joi.string().required().min(10).max(25).regex(/^[a-zA-Z]+$/),
+  content: Joi.string().required().min(50),
+  pinned: Joi.number().integer(),
+  status: Joi.string().required().valid('status_private', 'status_public'),
+  reference: Joi.string().uri(),
+  start_date: Joi.alternatives().conditional('end_date', {
+    then: Joi.date()
+  }),
+  end_date: Joi.date().min(Joi.ref('start_date')),
+});
+
+router.post("/blogs", isLoggedIn, upload.array("myImage", 5), async function (req, res, next) {
+  try {
+    await postSchema.validateAsync(req.body, { abortEarly: false });
+  } catch (err) {
+    return res.status(400).send(err);
+  }
+
+  const file = req.files;
+  let pathArray = [];
+
+  if (!file) {
+    return res.status(400).json({ message: "Please upload a file" });
+  }
+
+  const title = req.body.title;
+  const content = req.body.content;
+  const status = req.body.status;
+  const pinned = req.body.pinned;
+  const reference = req.body.reference;
+  const start_date = req.body.start_date;
+  const end_date = req.body.end_date
+  // Begin transaction
+  const conn = await pool.getConnection();
+  await conn.beginTransaction();
+
+  // req.user.id
+  try {
+    let results = await conn.query(
+      "INSERT INTO blogs(title, content, status, pinned, `like`, create_date, create_by_id, `reference`, start_date, end_date) " +
+        "VALUES(?, ?, ?, ?, 0, CURRENT_TIMESTAMP, ?, ?, ?, ?);",
+      [title, content, status, pinned, req.user.id, reference, start_date, end_date]
+    );
+    const blogId = results[0].insertId;
+
+    req.files.forEach((file, index) => {
+      let path = [blogId, file.path.substring(6), index == 0 ? 1 : 0];
+      pathArray.push(path);
+    });
+
+    await conn.query("INSERT INTO images(blog_id, file_path, main) VALUES ?;", [pathArray]);
+
+    await conn.commit();
+    res.status(200).send("success!");
+  } catch (err) {
+    console.log(err);
+    await conn.rollback();
+    return res.status(400).json(err);
+  } finally {
+    conn.release();
+  }
+});
+
 /**
  *  เริ่มทำข้อสอบได้ที่ใต้ข้อความนี้เลยครับ
  * !!! ไม่ต้องใส่ app.listen() ในไฟล์นี้นะครับ มันจะไป listen ที่ไฟล์ server.js เองครับ !!!
